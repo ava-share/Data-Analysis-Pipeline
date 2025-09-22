@@ -19,6 +19,7 @@ ROSBAG_FILE = "/media/avresearch/RouteData/perception_output_2025-09-11_15-09-03
 TOPIC_ODOM        = "/novatel/oem7/odom"             # nav_msgs/Odometry
 TOPIC_FUSED_BBOX  = "/yolov9/fused_bbox"             # jsk_recognition_msgs/BoundingBoxArray
 TOPIC_CAMERA_IMG  = "/yolov9/published_image"        # sensor_msgs/Image
+TOPIC_METADATA    = "/rosbag_metadata"               # std_msgs/String
 # TOPIC_LIDAR_PTS = "/front_lidar/points"            # sensor_msgs/PointCloud2  (NOT in this bag)
 
 # Association / filtering / video params
@@ -30,7 +31,7 @@ FRAME_RATE        = 10.0     # output video FPS
 
 # Verbosity and debugging
 VERBOSE                = True        # print progress messages during processing
-DEBUG_FIRST_N_OBJECTS  = 0           # set to >0 to process only first N objects (by sorted ID)
+DEBUG_FIRST_N_OBJECTS  = 2           # set to >0 to process only first N objects (by sorted ID)
 
 # Static-object handling: For these labels, replace all x,y with their global average
 # NOTE: Update this set to match your detector's numeric label IDs for static objects
@@ -161,8 +162,35 @@ def step1_dump_fused_bbox_csv(bag):
     print("[OK] Fused bbox CSV -> {}".format(out_csv))
     return out_csv
 
-# ====== STEP 2: READ ODOM FROM BAG -> CSV =============================
-def step2_dump_odom_csv(bag):
+# ====== STEP 2: READ METADATA FROM BAG =================================
+def step2_extract_metadata(bag):
+    """
+    Read std_msgs/String from TOPIC_METADATA and parse metadata fields.
+    Returns dict with parsed metadata or empty dict if not found.
+    """
+    metadata = {}
+    for topic, msg, t in bag.read_messages(topics=[TOPIC_METADATA]):
+        if hasattr(msg, 'data'):
+            data_str = msg.data
+            # Parse format: "location: RTA-4 Transit, vehicle: blue, passengers: 2, ..."
+            try:
+                pairs = [pair.strip() for pair in data_str.split(',')]
+                for pair in pairs:
+                    if ':' in pair:
+                        key, value = pair.split(':', 1)
+                        key = key.strip().lower().replace(' ', '_')
+                        value = value.strip()
+                        metadata[key] = value
+                break  # Take first message
+            except Exception as e:
+                print("[WARN] Failed to parse metadata: {}".format(e))
+                break
+    if VERBOSE:
+        print("[INFO] Extracted metadata: {}".format(metadata))
+    return metadata
+
+# ====== STEP 3: READ ODOM FROM BAG -> CSV =============================
+def step3_dump_odom_csv(bag):
     """
     Read nav_msgs/Odometry and dump timestamp + (x,y,z) + quaternion.
     """
@@ -182,8 +210,94 @@ def step2_dump_odom_csv(bag):
     print("[OK] Odom CSV -> {}".format(out_csv))
     return out_csv
 
-# ====== STEP 3: TRAJECTORY EXTRACTION (Notebook -> .py) ===============
-def step3_build_trajectories(fused_csv, odom_csv):
+# ====== STEP 4: CALCULATE KEY METRICS ===================================
+def step4_calculate_key_metrics(odom_csv, metadata, trajs):
+    """
+    Calculate key metrics from odometry and object counts.
+    Returns dict with all metrics.
+    """
+    # Load odometry data
+    ego = np.genfromtxt(odom_csv, delimiter=',', names=True)
+    ts = ego['timestamp']
+    xs = ego['position_x']
+    ys = ego['position_y']
+    
+    # Calculate duration
+    duration = ts[-1] - ts[0] if len(ts) > 1 else 0.0
+    
+    # Calculate distance (cumulative path length)
+    distances = []
+    for i in range(1, len(xs)):
+        dx = xs[i] - xs[i-1]
+        dy = ys[i] - ys[i-1]
+        distances.append(math.sqrt(dx*dx + dy*dy))
+    total_distance = sum(distances)
+    
+    # Calculate velocities (m/s)
+    velocities = []
+    for i in range(1, len(ts)):
+        dt = ts[i] - ts[i-1]
+        if dt > 0:
+            dx = xs[i] - xs[i-1]
+            dy = ys[i] - ys[i-1]
+            vel = math.sqrt(dx*dx + dy*dy) / dt
+            velocities.append(vel)
+    
+    max_velocity = max(velocities) if velocities else 0.0
+    avg_velocity = sum(velocities) / len(velocities) if velocities else 0.0
+    
+    # Calculate accelerations (m/s^2)
+    accelerations = []
+    for i in range(1, len(velocities)):
+        dt = ts[i+1] - ts[i] if i+1 < len(ts) else 1.0
+        if dt > 0:
+            accel = (velocities[i] - velocities[i-1]) / dt
+            accelerations.append(accel)
+    
+    max_acceleration = max(accelerations) if accelerations else 0.0
+    max_deceleration = min(accelerations) if accelerations else 0.0  # Most negative
+    
+    # Count objects by type
+    object_counts = {}
+    for tid, rows in trajs.items():
+        if not rows:
+            continue
+        # Use most common label for this track
+        labels = [r['label'] for r in rows]
+        try:
+            from collections import Counter
+            dom_label = Counter(labels).most_common(1)[0][0]
+        except Exception:
+            dom_label = labels[0] if labels else -1
+        
+        if dom_label not in object_counts:
+            object_counts[dom_label] = 0
+        object_counts[dom_label] += 1
+    
+    # Build metrics dict
+    metrics = {
+        'duration_s': duration,
+        'distance_m': total_distance,
+        'max_velocity_ms': max_velocity,
+        'avg_velocity_ms': avg_velocity,
+        'max_acceleration_ms2': max_acceleration,
+        'max_deceleration_ms2': max_deceleration,
+        'total_objects': len(trajs),
+        'object_counts_by_type': object_counts
+    }
+    
+    # Add metadata fields
+    for field in ['location', 'vehicle', 'passengers', 'road_type', 'road_condition', 'comments', 'maneuver']:
+        metrics[field] = metadata.get(field, '')
+    
+    if VERBOSE:
+        print("[INFO] Calculated key metrics: duration={:.1f}s, distance={:.1f}m, max_vel={:.1f}m/s, objects={}".format(
+            duration, total_distance, max_velocity, len(trajs)))
+    
+    return metrics
+
+# ====== STEP 5: TRAJECTORY EXTRACTION (Notebook -> .py) ===============
+def step5_build_trajectories(fused_csv, odom_csv):
     """
     Implements your notebook’s logic:
       - filter fused by frame_id if needed,
@@ -349,8 +463,42 @@ def step3_build_trajectories(fused_csv, odom_csv):
     print("[OK] Trajectories CSV -> {}".format(out_csv))
     return trajs, out_csv
 
-# ====== STEP 4: EXTRACT FRAMES PER OBJECT (±2s buffer) ================
-def step4_extract_frames(bag, trajs):
+# ====== STEP 6: WRITE KEY METRICS CSV ===================================
+def step6_write_key_metrics_csv(metrics):
+    """
+    Write key metrics to CSV file in BAG_OUT_DIR.
+    """
+    out_csv = os.path.join(BAG_OUT_DIR, "{}_key_metrics.csv".format(BAG_BASENAME))
+    
+    with open(out_csv, 'w') as f:
+        w = csv.writer(f)
+        
+        # Write header
+        header = ['metric', 'value']
+        w.writerow(header)
+        
+        # Write odometry-based metrics
+        w.writerow(['duration_s', metrics['duration_s']])
+        w.writerow(['distance_m', metrics['distance_m']])
+        w.writerow(['max_velocity_ms', metrics['max_velocity_ms']])
+        w.writerow(['avg_velocity_ms', metrics['avg_velocity_ms']])
+        w.writerow(['max_acceleration_ms2', metrics['max_acceleration_ms2']])
+        w.writerow(['max_deceleration_ms2', metrics['max_deceleration_ms2']])
+        w.writerow(['total_objects', metrics['total_objects']])
+        
+        # Write object counts by type
+        for label, count in metrics['object_counts_by_type'].items():
+            w.writerow(['objects_type_{}'.format(label), count])
+        
+        # Write metadata fields
+        for field in ['location', 'vehicle', 'passengers', 'road_type', 'road_condition', 'comments', 'maneuver']:
+            w.writerow([field, metrics[field]])
+    
+    print("[OK] Key metrics CSV -> {}".format(out_csv))
+    return out_csv
+
+# ====== STEP 7: EXTRACT FRAMES PER OBJECT (±2s buffer) ================
+def step7_extract_frames(bag, trajs):
     # Build per-object time windows
     ranges = {}
     for tid, rows in trajs.items():
@@ -376,8 +524,8 @@ def step4_extract_frames(bag, trajs):
                     print("[WARN] Failed to write {}".format(out_path))
     print("[OK] Frame extraction complete.")
 
-# ====== STEP 3.5: MAKE PER-OBJECT FOLDERS, CSV, PLOTS =================
-def step3p_finalize_objects(trajs):
+# ====== STEP 7.5: MAKE PER-OBJECT FOLDERS, CSV, PLOTS =================
+def step7p_finalize_objects(trajs):
     if VERBOSE:
         print("[INFO] Finalizing {} objects (CSV + plots)...".format(len(trajs)))
     for tid in sorted(trajs.keys()):
@@ -398,8 +546,8 @@ def step3p_finalize_objects(trajs):
         plot_xy(ts, xs, ys, os.path.join(obj_dir, "x-y-{}-cone.png".format(tid)), "Object {} (x-y)".format(tid))
         plot_yt(ts, ys, os.path.join(obj_dir, "y-t-{}-cone.png".format(tid)), "Object {} (y-t)".format(tid))
 
-# ====== STEP 5: MAKE WEB-PLAYABLE MP4s ================================
-def step5_make_videos_and_copy_odom():
+# ====== STEP 8: MAKE WEB-PLAYABLE MP4s ================================
+def step8_make_videos_and_copy_odom():
     # Videos
     for name in sorted(os.listdir(BAG_OUT_DIR)):
         obj_dir = os.path.join(BAG_OUT_DIR, name)
@@ -443,17 +591,20 @@ def main():
     print("Out : {}".format(BAG_OUT_DIR))
     with rosbag.Bag(ROSBAG_FILE, 'r') as bag:
         fused_csv = step1_dump_fused_bbox_csv(bag)
-        odom_csv  = step2_dump_odom_csv(bag)
-        trajs, traj_csv = step3_build_trajectories(fused_csv, odom_csv)
+        metadata = step2_extract_metadata(bag)
+        odom_csv  = step3_dump_odom_csv(bag)
+        trajs, traj_csv = step5_build_trajectories(fused_csv, odom_csv)
         # If debugging, keep only first N objects by sorted ID
         if DEBUG_FIRST_N_OBJECTS and DEBUG_FIRST_N_OBJECTS > 0:
             keep_ids = sorted(trajs.keys())[:DEBUG_FIRST_N_OBJECTS]
             trajs = {tid: trajs[tid] for tid in keep_ids}
             if VERBOSE:
                 print("[INFO] DEBUG: Restricting to first {} objects: {}".format(DEBUG_FIRST_N_OBJECTS, keep_ids))
-        step3p_finalize_objects(trajs)
-        step4_extract_frames(bag, trajs)
-    step5_make_videos_and_copy_odom()
+        metrics = step4_calculate_key_metrics(odom_csv, metadata, trajs)
+        step6_write_key_metrics_csv(metrics)
+        step7p_finalize_objects(trajs)
+        step7_extract_frames(bag, trajs)
+    step8_make_videos_and_copy_odom()
     print("=== Done. Results under: {} ===".format(BAG_OUT_DIR))
 
 if __name__ == "__main__":
