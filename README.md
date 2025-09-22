@@ -79,22 +79,21 @@ Notes:
 Given a bag basename `{bag}` and the configured `EXTRACTION_DATE`, the pipeline writes two sibling folders in the current working directory:
 
 ```text
-/Users/ylin/Research/AVA/
-  Extracted_data_{EXTRACTION_DATE}/
-    {bag}_extracted_data/
-      {bag}_novatel_odom_data.csv
-      {bag}_key_metrics.csv
-      {bag}_{id}/
-        camera/
-          frame_*.png
-        smoothed_trajectory_{id}.csv
-        x-y-{id}-*.png
-        y-t-{id}-*.png
-        {bag}_{id}.mp4
-
-  Intermediate_data_{EXTRACTION_DATE}/
-    {bag}_fused_bbox_results.csv
-    {bag}_trajectories_raw.csv
+.
+├── Extracted_data_{EXTRACTION_DATE}/
+│   └── {bag}_extracted_data/
+│       ├── {bag}_novatel_odom_data.csv
+│       ├── {bag}_key_metrics.csv
+│       └── {bag}_{id}/
+│           ├── camera/
+│           │   └── frame_*.png
+│           ├── smoothed_trajectory_{id}.csv
+│           ├── x-y-{id}-*.png
+│           ├── y-t-{id}-*.png
+│           └── {bag}_{id}.mp4
+└── Intermediate_data_{EXTRACTION_DATE}/
+    ├── {bag}_fused_bbox_results.csv
+    └── {bag}_trajectories_raw.csv
 ```
 
 Where:
