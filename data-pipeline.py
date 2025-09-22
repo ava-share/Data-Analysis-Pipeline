@@ -233,29 +233,44 @@ def step4_calculate_key_metrics(odom_csv, metadata, trajs):
         distances.append(math.sqrt(dx*dx + dy*dy))
     total_distance = sum(distances)
     
-    # Calculate velocities (m/s)
+    # Calculate average velocity directly from distance/duration
+    avg_velocity = total_distance / duration if duration > 0 else 0.0
+    
+    # Calculate instantaneous velocities for max speed analysis
     velocities = []
     for i in range(1, len(ts)):
         dt = ts[i] - ts[i-1]
-        if dt > 0:
+        if dt > 0 and dt < 10.0:  # Filter out large time gaps
             dx = xs[i] - xs[i-1]
             dy = ys[i] - ys[i-1]
             vel = math.sqrt(dx*dx + dy*dy) / dt
             velocities.append(vel)
     
-    max_velocity = max(velocities) if velocities else 0.0
-    avg_velocity = sum(velocities) / len(velocities) if velocities else 0.0
+    # Find max velocity < 25 m/s
+    valid_velocities = [v for v in velocities if v < 25.0]
+    max_velocity = max(valid_velocities) if valid_velocities else 0.0
     
     # Calculate accelerations (m/s^2)
     accelerations = []
     for i in range(1, len(velocities)):
-        dt = ts[i+1] - ts[i] if i+1 < len(ts) else 1.0
-        if dt > 0:
+        dt = ts[i+1] - ts[i-1] if i+1 < len(ts) else ts[i] - ts[i-1]
+        if dt > 0 and dt < 5.0:  # Filter out large time gaps
             accel = (velocities[i] - velocities[i-1]) / dt
             accelerations.append(accel)
     
-    max_acceleration = max(accelerations) if accelerations else 0.0
-    max_deceleration = min(accelerations) if accelerations else 0.0  # Most negative
+    # Find max acceleration < 5 m/s²
+    valid_accelerations = [a for a in accelerations if a < 5.0]
+    max_acceleration = max(valid_accelerations) if valid_accelerations else 0.0
+    
+    # Find max deceleration > -5 m/s² (most negative but not too extreme)
+    valid_decelerations = [a for a in accelerations if a > -5.0]
+    max_deceleration = min(valid_decelerations) if valid_decelerations else 0.0  # Most negative
+    
+    if VERBOSE:
+        print("[INFO] Velocity stats: avg={:.2f} m/s (from distance/duration), max={:.2f} m/s (<25 m/s filter)".format(
+            avg_velocity, max_velocity))
+        print("[INFO] Acceleration stats: max_accel={:.2f} m/s² (<5 m/s²), max_decel={:.2f} m/s² (>-5 m/s²)".format(
+            max_acceleration, max_deceleration))
     
     # Count objects by type
     object_counts = {}
