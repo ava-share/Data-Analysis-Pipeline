@@ -38,6 +38,7 @@ Edit `data-pipeline.py` top-level constants to match your environment:
 
 4) Key Metrics Calculation
    - Calculates duration, distance, max/average velocity, max acceleration/deceleration from odometry.
+   - Uses downsampling to reduce noise in velocity/acceleration calculations (aims for ~100 samples).
    - Counts detected objects by type from trajectories.
    - Combines with metadata fields.
    - Writes `{BAG_OUT_DIR}/{bag}_key_metrics.csv`.
@@ -105,6 +106,13 @@ The `{bag}_key_metrics.csv` file contains:
 - **Odometry metrics**: duration_s, distance_m, max_velocity_ms, avg_velocity_ms, max_acceleration_ms2, max_deceleration_ms2
 - **Object counts**: total_objects, objects_type_{label} for each detected object type
 - **Metadata fields**: location, vehicle, passengers, road_type, road_condition, comments, maneuver
+
+**Velocity/Acceleration Processing:**
+- **Average velocity**: Calculated directly from total distance divided by duration
+- **Max velocity**: Uses downsampled data (every Nth point) with < 25 m/s filter
+- **Max acceleration**: Uses downsampled velocities with < 5 m/s² filter  
+- **Max deceleration**: Uses downsampled velocities with > -5 m/s² filter
+- **Noise reduction**: Downsampling reduces high-frequency sensor noise for realistic measurements
 
 Example:
 ```csv
