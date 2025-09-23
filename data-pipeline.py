@@ -236,13 +236,15 @@ def step4_calculate_key_metrics(odom_csv, metadata, trajs):
     # Calculate average velocity directly from distance/duration
     avg_velocity = total_distance / duration if duration > 0 else 0.0
     
-    # Calculate instantaneous velocities for max speed analysis
+    # Downsample for velocity calculation - use every Nth point to reduce noise
+    downsample_factor = max(1, len(ts) // 100)  # Aim for ~100 velocity samples
     velocities = []
-    for i in range(1, len(ts)):
-        dt = ts[i] - ts[i-1]
-        if dt > 0 and dt < 10.0:  # Filter out large time gaps
-            dx = xs[i] - xs[i-1]
-            dy = ys[i] - ys[i-1]
+    for i in range(downsample_factor, len(ts), downsample_factor):
+        prev_i = i - downsample_factor
+        dt = ts[i] - ts[prev_i]
+        if dt > 0.1 and dt < 10.0:  # Use 0.1s minimum time interval
+            dx = xs[i] - xs[prev_i]
+            dy = ys[i] - ys[prev_i]
             vel = math.sqrt(dx*dx + dy*dy) / dt
             velocities.append(vel)
     
@@ -250,13 +252,17 @@ def step4_calculate_key_metrics(odom_csv, metadata, trajs):
     valid_velocities = [v for v in velocities if v < 25.0]
     max_velocity = max(valid_velocities) if valid_velocities else 0.0
     
-    # Calculate accelerations (m/s^2)
+    # Calculate accelerations from downsampled velocities
     accelerations = []
     for i in range(1, len(velocities)):
-        dt = ts[i+1] - ts[i-1] if i+1 < len(ts) else ts[i] - ts[i-1]
-        if dt > 0 and dt < 5.0:  # Filter out large time gaps
-            accel = (velocities[i] - velocities[i-1]) / dt
-            accelerations.append(accel)
+        # Use the time interval between the two velocity measurements
+        vel_idx = i * downsample_factor
+        prev_vel_idx = (i-1) * downsample_factor
+        if vel_idx < len(ts) and prev_vel_idx < len(ts):
+            dt = ts[vel_idx] - ts[prev_vel_idx]
+            if dt > 0.1 and dt < 5.0:  # Use 0.1s minimum time interval
+                accel = (velocities[i] - velocities[i-1]) / dt
+                accelerations.append(accel)
     
     # Find max acceleration < 5 m/s²
     valid_accelerations = [a for a in accelerations if a < 5.0]
