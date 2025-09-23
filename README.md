@@ -115,25 +115,25 @@ The `{bag}_key_metrics.csv` file contains:
 - **Noise reduction**: Downsampling reduces high-frequency sensor noise for realistic measurements
 
 Example:
-```csv
-metric,value
-duration_s,45.2
-distance_m,123.4
-max_velocity_ms,8.5
-avg_velocity_ms,2.7
-max_acceleration_ms2,1.2
-max_deceleration_ms2,-2.1
-total_objects,15
-objects_type_80,3
-objects_type_9,2
-location,RTA-4 Transit
-vehicle,blue
-passengers,2
-road_type,gravel
-road_condition,dry
-comments,No comments
-maneuver,manual driving
-```
+| Metric | Value |
+|--------|-------|
+| duration_s | 45.2 |
+| distance_m | 123.4 |
+| max_velocity_ms | 8.5 |
+| avg_velocity_ms | 2.7 |
+| max_acceleration_ms2 | 1.2 |
+| max_deceleration_ms2 | -2.1 |
+| total_objects | 15 |
+| objects_type_80 | 3 |
+| objects_type_9 | 2 |
+| location | RTA-4 Transit |
+| vehicle | blue |
+| passengers | 2 |
+| road_type | gravel |
+| road_condition | dry |
+| comments | No comments |
+| maneuver | manual driving |
+
 
 ### Tips
 - If camera images fail to save, verify `cv2` is installed and images are decodable; the script will log warnings when it can’t write files.
