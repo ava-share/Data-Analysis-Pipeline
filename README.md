@@ -117,12 +117,12 @@ The `{bag}_key_metrics.csv` file contains:
 Example:
 | Metric | Value |
 |--------|-------|
-| duration_s | 45.2 |
-| distance_m | 123.4 |
-| max_velocity_ms | 8.5 |
-| avg_velocity_ms | 2.7 |
-| max_acceleration_ms2 | 1.2 |
-| max_deceleration_ms2 | -2.1 |
+| duration_s | 96.13 |
+| distance_m | 514.82|
+| max_velocity_ms | 7.59 |
+| avg_velocity_ms | 5.36 |
+| max_acceleration_ms2 | 1.10 |
+| max_deceleration_ms2 | -0.90 |
 | total_objects | 15 |
 | objects_type_80 | 3 |
 | objects_type_9 | 2 |
