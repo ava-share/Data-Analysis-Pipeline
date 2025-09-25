@@ -123,9 +123,8 @@ Example:
 | avg_velocity_ms | 5.36 |
 | max_acceleration_ms2 | 1.10 |
 | max_deceleration_ms2 | -0.90 |
-| total_objects | 15 |
-| objects_type_80 | 3 |
-| objects_type_9 | 2 |
+| total_objects | 2 |
+| objects_type_cone | 2 |
 | location | RTA-4 Transit |
 | vehicle | blue |
 | passengers | 2 |
