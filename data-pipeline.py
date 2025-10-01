@@ -11,7 +11,7 @@ matplotlib.use('Agg')   # headless
 import matplotlib.pyplot as plt
 
 # ====== CONFIG =========================================================
-EXTRACTION_DATE = "10012025"   # e.g., run date token you want in the root folder name
+EXTRACTION_DATE = "16092025"   # e.g., run date token you want in the root folder name
 
 # BATCH PROCESSING: Set one of these options
 # Option 1: Process single rosbag file
@@ -19,8 +19,11 @@ EXTRACTION_DATE = "10012025"   # e.g., run date token you want in the root folde
 # ROSBAG_FILE = "/media/avresearch/RouteData/0828_Route2_Rosbags/Trial_1_2024-08-28-11/2024-08-28-11-23-33_2.bag"
 
 # Option 2: Process all rosbags in a folder
-ROSBAG_FOLDER = "/media/avresearch/RouteData/0712_Route_1_Rosbags/RUN_1"  # Set to None to use single file
+ROSBAG_FOLDER = "/media/avresearch/RouteData/perception_output_2025-09-11_15-09-03/"  # Set to None to use single file
 ROSBAG_FILE = None  # Set to None to use folder processing
+
+# Folder search options
+SEARCH_RECURSIVELY = True  # Set to True to search all subdirectories, False for top-level only
 
 # Option 3: Process specific rosbags by pattern
 # ROSBAG_PATTERN = "*.bag"  # Process all .bag files in folder
@@ -650,8 +653,14 @@ def get_rosbag_files():
             return []
         
         # Find all .bag files in folder
-        pattern = os.path.join(ROSBAG_FOLDER, "*.bag")
-        bag_files = glob.glob(pattern)
+        if SEARCH_RECURSIVELY:
+            # Search recursively in all subdirectories
+            pattern = os.path.join(ROSBAG_FOLDER, "**", "*.bag")
+            bag_files = glob.glob(pattern, recursive=True)
+        else:
+            # Search only in top-level folder
+            pattern = os.path.join(ROSBAG_FOLDER, "*.bag")
+            bag_files = glob.glob(pattern)
         
         if not bag_files:
             print("[WARN] No .bag files found in folder: {}".format(ROSBAG_FOLDER))
