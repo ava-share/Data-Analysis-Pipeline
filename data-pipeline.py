@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 
-import os, sys, csv, math, shutil, errno
+import os, sys, csv, math, shutil, errno, glob
 import cv2
 import rosbag
 import numpy as np
@@ -11,9 +11,20 @@ matplotlib.use('Agg')   # headless
 import matplotlib.pyplot as plt
 
 # ====== CONFIG =========================================================
-EXTRACTION_DATE = "16092025"   # e.g., run date token you want in the root folder name
-ROSBAG_FILE = "/media/avresearch/RouteData/perception_output_2025-09-11_15-09-03/rosbag_perception_output_2025-09-09_12-43-25_2025-09-09-12-43-27_0.bag"
+EXTRACTION_DATE = "10012025"   # e.g., run date token you want in the root folder name
+
+# BATCH PROCESSING: Set one of these options
+# Option 1: Process single rosbag file
+# ROSBAG_FILE = "/media/avresearch/RouteData/perception_output_2025-09-11_15-09-03/rosbag_perception_output_2025-09-09_12-43-25_2025-09-09-12-43-27_0.bag"
 # ROSBAG_FILE = "/media/avresearch/RouteData/0828_Route2_Rosbags/Trial_1_2024-08-28-11/2024-08-28-11-23-33_2.bag"
+
+# Option 2: Process all rosbags in a folder
+ROSBAG_FOLDER = "/media/avresearch/RouteData/0712_Route_1_Rosbags/RUN_1"  # Set to None to use single file
+ROSBAG_FILE = None  # Set to None to use folder processing
+
+# Option 3: Process specific rosbags by pattern
+# ROSBAG_PATTERN = "*.bag"  # Process all .bag files in folder
+# ROSBAG_PATTERN = "*trial*.bag"  # Process only files matching pattern
 
 # Topics in your bag
 TOPIC_ODOM        = "/novatel/oem7/odom"             # nav_msgs/Odometry
@@ -67,11 +78,10 @@ def ensure_dir(path):
         if e.errno != errno.EEXIST:
             raise
 
-BAG_BASENAME = os.path.splitext(os.path.basename(ROSBAG_FILE))[0]
-ROOT_OUT     = "Extracted_data_{}".format(EXTRACTION_DATE)
-BAG_OUT_DIR  = os.path.join(ROOT_OUT, "{}_extracted_data".format(BAG_BASENAME))
-ensure_dir(BAG_OUT_DIR)
+# Initialize output directories (will be set per bag in batch processing)
+ROOT_OUT = "Extracted_data_{}".format(EXTRACTION_DATE)
 INTERMEDIATE_OUT = "Intermediate_data_{}".format(EXTRACTION_DATE)
+ensure_dir(ROOT_OUT)
 ensure_dir(INTERMEDIATE_OUT)
 
 # ====== UTILITIES ======================================================
@@ -150,13 +160,13 @@ def plot_yt(ts, ys, out_path, title):
 #         for (x,y,z) in pc: f.write('{} {} {}\n'.format(x,y,z))
 
 # ====== STEP 1: READ FUSED BBOX FROM BAG -> CSV ========================
-def step1_dump_fused_bbox_csv(bag):
+def step1_dump_fused_bbox_csv(bag, bag_basename):
     """
     Read jsk_recognition_msgs/BoundingBoxArray from TOPIC_FUSED_BBOX
     and dump a tidy CSV with timestamp, frame_id, position, dims, label.
     """
     # Save to intermediate results folder parallel to ROOT_OUT
-    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_fused_bbox_results.csv".format(BAG_BASENAME))
+    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_fused_bbox_results.csv".format(bag_basename))
     wrote_header = False
     msg_count = 0
     with open(out_csv, 'w') as f:
@@ -207,11 +217,11 @@ def step2_extract_metadata(bag):
     return metadata
 
 # ====== STEP 3: READ ODOM FROM BAG -> CSV =============================
-def step3_dump_odom_csv(bag):
+def step3_dump_odom_csv(bag, bag_basename, bag_out_dir):
     """
     Read nav_msgs/Odometry and dump timestamp + (x,y,z) + quaternion.
     """
-    out_csv = os.path.join(BAG_OUT_DIR, "{}_novatel_odom_data.csv".format(BAG_BASENAME))
+    out_csv = os.path.join(bag_out_dir, "{}_novatel_odom_data.csv".format(bag_basename))
     msg_count = 0
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
@@ -335,9 +345,9 @@ def step4_calculate_key_metrics(odom_csv, metadata, trajs):
     return metrics
 
 # ====== STEP 5: TRAJECTORY EXTRACTION (Notebook -> .py) ===============
-def step5_build_trajectories(fused_csv, odom_csv):
+def step5_build_trajectories(fused_csv, odom_csv, bag_basename):
     """
-    Implements your notebook’s logic:
+    Implements your notebook's logic:
       - filter fused by frame_id if needed,
       - align with ego trajectory,
       - rotate/translate detections into ego global UTM,
@@ -491,7 +501,7 @@ def step5_build_trajectories(fused_csv, odom_csv):
 
     # --- write trajectories_raw.csv
     # Save to intermediate results folder parallel to ROOT_OUT
-    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_trajectories_raw.csv".format(BAG_BASENAME))
+    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_trajectories_raw.csv".format(bag_basename))
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
         w.writerow(['ID','time','rosbagtime_int','x','y','z','label'])
@@ -502,11 +512,11 @@ def step5_build_trajectories(fused_csv, odom_csv):
     return trajs, out_csv
 
 # ====== STEP 6: WRITE KEY METRICS CSV ===================================
-def step6_write_key_metrics_csv(metrics):
+def step6_write_key_metrics_csv(metrics, bag_basename, bag_out_dir):
     """
     Write key metrics to CSV file in BAG_OUT_DIR.
     """
-    out_csv = os.path.join(BAG_OUT_DIR, "{}_key_metrics.csv".format(BAG_BASENAME))
+    out_csv = os.path.join(bag_out_dir, "{}_key_metrics.csv".format(bag_basename))
     
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
@@ -537,7 +547,7 @@ def step6_write_key_metrics_csv(metrics):
     return out_csv
 
 # ====== STEP 7: EXTRACT FRAMES PER OBJECT (±2s buffer) ================
-def step7_extract_frames(bag, trajs):
+def step7_extract_frames(bag, trajs, bag_basename, bag_out_dir):
     # Build per-object time windows
     ranges = {}
     for tid, rows in trajs.items():
@@ -554,7 +564,7 @@ def step7_extract_frames(bag, trajs):
         ts = t.to_sec(); ts_i = int(ts); ms = int(ts * 1000.0)
         for tid, (lo, hi) in ranges.items():
             if lo <= ts_i <= hi:
-                obj_dir = os.path.join(BAG_OUT_DIR, "{}_{}".format(BAG_BASENAME, tid))
+                obj_dir = os.path.join(bag_out_dir, "{}_{}".format(bag_basename, tid))
                 cam_dir = os.path.join(obj_dir, "camera")
                 ensure_dir(cam_dir)
                 img = convert_img_to_cv2(msg)
@@ -564,11 +574,11 @@ def step7_extract_frames(bag, trajs):
     print("[OK] Frame extraction complete.")
 
 # ====== STEP 7.5: MAKE PER-OBJECT FOLDERS, CSV, PLOTS =================
-def step7p_finalize_objects(trajs):
+def step7p_finalize_objects(trajs, bag_basename, bag_out_dir):
     if VERBOSE:
         print("[INFO] Finalizing {} objects (CSV + plots)...".format(len(trajs)))
     for tid in sorted(trajs.keys()):
-        obj_dir = os.path.join(BAG_OUT_DIR, "{}_{}".format(BAG_BASENAME, tid))
+        obj_dir = os.path.join(bag_out_dir, "{}_{}".format(bag_basename, tid))
         cam_dir = os.path.join(obj_dir, "camera")
         ensure_dir(obj_dir); ensure_dir(cam_dir)
         # per-object CSV
@@ -586,10 +596,10 @@ def step7p_finalize_objects(trajs):
         plot_yt(ts, ys, os.path.join(obj_dir, "y-t-{}-cone.png".format(tid)), "Object {} (y-t)".format(tid))
 
 # ====== STEP 8: MAKE WEB-PLAYABLE MP4s ================================
-def step8_make_videos_and_copy_odom():
+def step8_make_videos_and_copy_odom(bag_basename, bag_out_dir):
     # Videos
-    for name in sorted(os.listdir(BAG_OUT_DIR)):
-        obj_dir = os.path.join(BAG_OUT_DIR, name)
+    for name in sorted(os.listdir(bag_out_dir)):
+        obj_dir = os.path.join(bag_out_dir, name)
         if not os.path.isdir(obj_dir): continue
         cam_dir = os.path.join(obj_dir, "camera")
         if not os.path.isdir(cam_dir): continue
@@ -615,36 +625,112 @@ def step8_make_videos_and_copy_odom():
         print("[OK] Video -> {}".format(out_mp4))
 
     # Copy odom CSV to the bag folder (already there, but ensure presence)
-    src = os.path.join(BAG_OUT_DIR, "{}_novatel_odom_data.csv".format(BAG_BASENAME))
-    dst = os.path.join(BAG_OUT_DIR, os.path.basename(src))
+    src = os.path.join(bag_out_dir, "{}_novatel_odom_data.csv".format(bag_basename))
+    dst = os.path.join(bag_out_dir, os.path.basename(src))
     if os.path.exists(src):
         try:
             shutil.copy(src, dst)
         except shutil.Error:
             pass
 
+# ====== BATCH PROCESSING FUNCTIONS ====================================
+def get_rosbag_files():
+    """Get list of rosbag files to process based on configuration."""
+    if ROSBAG_FILE is not None:
+        # Single file mode
+        if os.path.exists(ROSBAG_FILE):
+            return [ROSBAG_FILE]
+        else:
+            print("[ERROR] Rosbag file not found: {}".format(ROSBAG_FILE))
+            return []
+    elif ROSBAG_FOLDER is not None:
+        # Folder mode
+        if not os.path.exists(ROSBAG_FOLDER):
+            print("[ERROR] Rosbag folder not found: {}".format(ROSBAG_FOLDER))
+            return []
+        
+        # Find all .bag files in folder
+        pattern = os.path.join(ROSBAG_FOLDER, "*.bag")
+        bag_files = glob.glob(pattern)
+        
+        if not bag_files:
+            print("[WARN] No .bag files found in folder: {}".format(ROSBAG_FOLDER))
+            return []
+        
+        print("[INFO] Found {} rosbag files in folder: {}".format(len(bag_files), ROSBAG_FOLDER))
+        return sorted(bag_files)
+    else:
+        print("[ERROR] Neither ROSBAG_FILE nor ROSBAG_FOLDER is configured")
+        return []
+
+def process_single_bag(rosbag_file):
+    """Process a single rosbag file and return success status."""
+    try:
+        bag_basename = os.path.splitext(os.path.basename(rosbag_file))[0]
+        bag_out_dir = os.path.join(ROOT_OUT, "{}_extracted_data".format(bag_basename))
+        ensure_dir(bag_out_dir)
+        
+        print("\n=== Processing: {} ===".format(os.path.basename(rosbag_file)))
+        print("Output: {}".format(bag_out_dir))
+        
+        with rosbag.Bag(rosbag_file, 'r') as bag:
+            fused_csv = step1_dump_fused_bbox_csv(bag, bag_basename)
+            metadata = step2_extract_metadata(bag)
+            odom_csv = step3_dump_odom_csv(bag, bag_basename, bag_out_dir)
+            trajs, traj_csv = step5_build_trajectories(fused_csv, odom_csv, bag_basename)
+            
+            # If debugging, keep only first N objects by sorted ID
+            if DEBUG_FIRST_N_OBJECTS and DEBUG_FIRST_N_OBJECTS > 0:
+                keep_ids = sorted(trajs.keys())[:DEBUG_FIRST_N_OBJECTS]
+                trajs = {tid: trajs[tid] for tid in keep_ids}
+                if VERBOSE:
+                    print("[INFO] DEBUG: Restricting to first {} objects: {}".format(DEBUG_FIRST_N_OBJECTS, keep_ids))
+            
+            metrics = step4_calculate_key_metrics(odom_csv, metadata, trajs)
+            step6_write_key_metrics_csv(metrics, bag_basename, bag_out_dir)
+            step7p_finalize_objects(trajs, bag_basename, bag_out_dir)
+            step7_extract_frames(bag, trajs, bag_basename, bag_out_dir)
+        
+        step8_make_videos_and_copy_odom(bag_basename, bag_out_dir)
+        print("=== Completed: {} ===".format(os.path.basename(rosbag_file)))
+        return True
+        
+    except Exception as e:
+        print("[ERROR] Failed to process {}: {}".format(rosbag_file, str(e)))
+        if VERBOSE:
+            import traceback
+            traceback.print_exc()
+        return False
+
 # ====== MAIN ==========================================================
 def main():
-    print("=== Pipeline start ===")
-    print("Bag : {}".format(ROSBAG_FILE))
-    print("Out : {}".format(BAG_OUT_DIR))
-    with rosbag.Bag(ROSBAG_FILE, 'r') as bag:
-        fused_csv = step1_dump_fused_bbox_csv(bag)
-        metadata = step2_extract_metadata(bag)
-        odom_csv  = step3_dump_odom_csv(bag)
-        trajs, traj_csv = step5_build_trajectories(fused_csv, odom_csv)
-        # If debugging, keep only first N objects by sorted ID
-        if DEBUG_FIRST_N_OBJECTS and DEBUG_FIRST_N_OBJECTS > 0:
-            keep_ids = sorted(trajs.keys())[:DEBUG_FIRST_N_OBJECTS]
-            trajs = {tid: trajs[tid] for tid in keep_ids}
-            if VERBOSE:
-                print("[INFO] DEBUG: Restricting to first {} objects: {}".format(DEBUG_FIRST_N_OBJECTS, keep_ids))
-        metrics = step4_calculate_key_metrics(odom_csv, metadata, trajs)
-        step6_write_key_metrics_csv(metrics)
-        step7p_finalize_objects(trajs)
-        step7_extract_frames(bag, trajs)
-    step8_make_videos_and_copy_odom()
-    print("=== Done. Results under: {} ===".format(BAG_OUT_DIR))
+    print("=== Batch Pipeline start ===")
+    
+    # Get list of rosbag files to process
+    bag_files = get_rosbag_files()
+    if not bag_files:
+        print("[ERROR] No rosbag files to process")
+        return
+    
+    print("Processing {} rosbag files...".format(len(bag_files)))
+    
+    # Process each bag
+    successful = 0
+    failed = 0
+    
+    for i, bag_file in enumerate(bag_files, 1):
+        print("\n[{}/{}] Processing: {}".format(i, len(bag_files), os.path.basename(bag_file)))
+        
+        if process_single_bag(bag_file):
+            successful += 1
+        else:
+            failed += 1
+    
+    # Summary
+    print("\n=== Batch Processing Complete ===")
+    print("Successful: {}".format(successful))
+    print("Failed: {}".format(failed))
+    print("Results under: {}".format(ROOT_OUT))
 
 if __name__ == "__main__":
     main()
