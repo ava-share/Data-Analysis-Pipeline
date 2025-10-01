@@ -14,7 +14,9 @@ This repository contains a Python-based pipeline to extract, associate, and pack
 ### Configuration
 Edit `data-pipeline.py` top-level constants to match your environment:
 - `EXTRACTION_DATE`: Tag used in output folder names.
-- `ROSBAG_FILE`: Absolute path to the input `.bag` file.
+- **Input Configuration** (choose one):
+  - **Batch Processing**: Set `ROSBAG_FOLDER` to the path containing multiple `.bag` files, and `ROSBAG_FILE = None`
+  - **Single File**: Set `ROSBAG_FILE` to the absolute path of a single `.bag` file, and `ROSBAG_FOLDER = None`
 - Topic names: `TOPIC_ODOM`, `TOPIC_FUSED_BBOX`, `TOPIC_CAMERA_IMG`.
 - Association/smoothing params: `MAX_SPEED_M_S`, `BASE_GATING_M`, `MIN_TRACK_LIFETIME_S`, `SMOOTH_WINDOW_K`, `FRAME_RATE`.
 - Verbosity/debug:
@@ -66,6 +68,21 @@ Edit `data-pipeline.py` top-level constants to match your environment:
 ### How to Run (Python 2)
 Ensure you are in the ROS Python 2 environment where `rosbag` is available.
 
+**For Batch Processing (Multiple Rosbags):**
+```python
+# In data-pipeline.py, set:
+ROSBAG_FOLDER = "/path/to/your/rosbag/folder/"
+ROSBAG_FILE = None
+```
+
+**For Single File Processing:**
+```python
+# In data-pipeline.py, set:
+ROSBAG_FILE = "/path/to/single/rosbag.bag"
+ROSBAG_FOLDER = None
+```
+
+Then run:
 ```bash
 python2 /Users/ylin/Research/AVA/data-pipeline.py
 ```
@@ -74,11 +91,14 @@ Notes:
 - If using ROS Noetic (Python 3), adjust to `python3` and ensure dependencies are available.
 - Verbose progress is enabled by default (`VERBOSE = True`).
 - To process all objects, set `DEBUG_FIRST_N_OBJECTS = 0`. For a quick test, set it to a small number (e.g., `2`).
+- **Batch processing**: The pipeline will automatically discover all `.bag` files in the specified folder and process them sequentially.
+- **Error handling**: If individual bags fail to process, the pipeline continues with remaining bags and provides a summary at the end.
 
 ### Output Structure
 
 Given a bag basename `{bag}` and the configured `EXTRACTION_DATE`, the pipeline writes two sibling folders in the current working directory:
 
+**For Single File Processing:**
 ```text
 .
 ├── Extracted_data_{EXTRACTION_DATE}/
@@ -97,9 +117,36 @@ Given a bag basename `{bag}` and the configured `EXTRACTION_DATE`, the pipeline 
     └── {bag}_trajectories_raw.csv
 ```
 
+**For Batch Processing (Multiple Rosbags):**
+```text
+.
+├── Extracted_data_{EXTRACTION_DATE}/
+│   ├── {bag1}_extracted_data/
+│   │   ├── {bag1}_novatel_odom_data.csv
+│   │   ├── {bag1}_key_metrics.csv
+│   │   └── {bag1}_{id}/
+│   │       ├── camera/
+│   │       │   └── frame_*.png
+│   │       ├── smoothed_trajectory_{id}.csv
+│   │       ├── x-y-{id}-*.png
+│   │       ├── y-t-{id}-*.png
+│   │       └── {bag1}_{id}.mp4
+│   ├── {bag2}_extracted_data/
+│   │   └── ...
+│   └── {bag3}_extracted_data/
+│       └── ...
+└── Intermediate_data_{EXTRACTION_DATE}/
+    ├── {bag1}_fused_bbox_results.csv
+    ├── {bag1}_trajectories_raw.csv
+    ├── {bag2}_fused_bbox_results.csv
+    ├── {bag2}_trajectories_raw.csv
+    └── ...
+```
+
 Where:
-- `Extracted_data_{EXTRACTION_DATE}/{bag}_extracted_data/` contains the per-object deliverables, odometry CSV, and key metrics CSV.
-- `Intermediate_data_{EXTRACTION_DATE}/` contains the intermediate CSVs for sanity checks.
+- `Extracted_data_{EXTRACTION_DATE}/{bag}_extracted_data/` contains the per-object deliverables, odometry CSV, and key metrics CSV for each bag.
+- `Intermediate_data_{EXTRACTION_DATE}/` contains the intermediate CSVs for sanity checks for all processed bags.
+- **Batch processing**: Each rosbag gets its own output directory with the same structure, allowing you to process multiple bags while maintaining organized outputs.
 
 ### Key Metrics CSV Format
 The `{bag}_key_metrics.csv` file contains:
@@ -115,16 +162,18 @@ The `{bag}_key_metrics.csv` file contains:
 - **Noise reduction**: Downsampling reduces high-frequency sensor noise for realistic measurements
 
 Example:
+
 | Metric | Value |
 |--------|-------|
-| duration_s | 96.13 |
-| distance_m | 514.82|
-| max_velocity_ms | 7.59 |
-| avg_velocity_ms | 5.36 |
-| max_acceleration_ms2 | 1.10 |
-| max_deceleration_ms2 | -0.90 |
-| total_objects | 2 |
-| objects_type_cone | 2 |
+| duration_s | 45.2 |
+| distance_m | 123.4 |
+| max_velocity_ms | 8.5 |
+| avg_velocity_ms | 2.7 |
+| max_acceleration_ms2 | 1.2 |
+| max_deceleration_ms2 | -2.1 |
+| total_objects | 15 |
+| objects_type_cone | 3 |
+| objects_type_traffic_light | 2 |
 | location | RTA-4 Transit |
 | vehicle | blue |
 | passengers | 2 |
@@ -133,10 +182,12 @@ Example:
 | comments | No comments |
 | maneuver | manual driving |
 
-
 ### Tips
-- If camera images fail to save, verify `cv2` is installed and images are decodable; the script will log warnings when it can’t write files.
+- If camera images fail to save, verify `cv2` is installed and images are decodable; the script will log warnings when it can't write files.
 - If you see few or no tracks, check topic names, labels, and gating parameters.
-- Update `STATIC_LABEL_IDS` with your detector’s numeric labels for static objects to enforce average-position smoothing on those classes.
+- Update `STATIC_LABEL_IDS` with your detector's numeric labels for static objects to enforce average-position smoothing on those classes.
+- **Batch processing**: The pipeline processes bags sequentially and provides progress updates. Failed bags are logged but don't stop the entire batch.
+- **Memory usage**: For large batches, consider processing smaller subsets if memory becomes an issue.
+- **Output organization**: Each bag maintains its own output directory, making it easy to identify results from specific rosbags.
 
 
