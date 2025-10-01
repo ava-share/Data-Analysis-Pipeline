@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import os, sys, csv, math, shutil, errno, glob
+import fnmatch
 import cv2
 import rosbag
 import numpy as np
@@ -19,7 +20,7 @@ EXTRACTION_DATE = "16092025"   # e.g., run date token you want in the root folde
 # ROSBAG_FILE = "/media/avresearch/RouteData/0828_Route2_Rosbags/Trial_1_2024-08-28-11/2024-08-28-11-23-33_2.bag"
 
 # Option 2: Process all rosbags in a folder
-ROSBAG_FOLDER = "/media/avresearch/RouteData/perception_output_2025-09-11_15-09-03/"  # Set to None to use single file
+ROSBAG_FOLDER = "/home/avresearch/Rounte2AutonomousTesting9_30_2025"  # Set to None to use single file
 ROSBAG_FILE = None  # Set to None to use folder processing
 
 # Folder search options
@@ -591,12 +592,24 @@ def step7p_finalize_objects(trajs, bag_basename, bag_out_dir):
             w.writerow(['timestamp','x','y','z','label'])
             for r in trajs[tid]:
                 w.writerow([r['time'], r['x'], r['y'], r['z'], r['label']])
+        
+        # Determine object type for filename
+        labels = [r['label'] for r in trajs[tid]]
+        try:
+            from collections import Counter
+            dom_label = Counter(labels).most_common(1)[0][0]
+        except Exception:
+            dom_label = labels[0] if labels else -1
+        
+        # Get object type name
+        object_type_name = OBJECT_TYPE_NAMES.get(dom_label, 'unknown_{}'.format(dom_label))
+        
         # plots
         ts = [r['time'] for r in trajs[tid]]
         xs = [r['x'] for r in trajs[tid]]
         ys = [r['y'] for r in trajs[tid]]
-        plot_xy(ts, xs, ys, os.path.join(obj_dir, "x-y-{}-cone.png".format(tid)), "Object {} (x-y)".format(tid))
-        plot_yt(ts, ys, os.path.join(obj_dir, "y-t-{}-cone.png".format(tid)), "Object {} (y-t)".format(tid))
+        plot_xy(ts, xs, ys, os.path.join(obj_dir, "x-y-{}-{}.png".format(tid, object_type_name)), "Object {} (x-y)".format(tid))
+        plot_yt(ts, ys, os.path.join(obj_dir, "y-t-{}-{}.png".format(tid, object_type_name)), "Object {} (y-t)".format(tid))
 
 # ====== STEP 8: MAKE WEB-PLAYABLE MP4s ================================
 def step8_make_videos_and_copy_odom(bag_basename, bag_out_dir):
@@ -637,6 +650,14 @@ def step8_make_videos_and_copy_odom(bag_basename, bag_out_dir):
             pass
 
 # ====== BATCH PROCESSING FUNCTIONS ====================================
+def find_files_recursive(directory, pattern):
+    """Find files matching pattern recursively in directory (Python 2 compatible)."""
+    matches = []
+    for root, dirnames, filenames in os.walk(directory):
+        for filename in fnmatch.filter(filenames, pattern):
+            matches.append(os.path.join(root, filename))
+    return matches
+
 def get_rosbag_files():
     """Get list of rosbag files to process based on configuration."""
     if ROSBAG_FILE is not None:
@@ -654,9 +675,8 @@ def get_rosbag_files():
         
         # Find all .bag files in folder
         if SEARCH_RECURSIVELY:
-            # Search recursively in all subdirectories
-            pattern = os.path.join(ROSBAG_FOLDER, "**", "*.bag")
-            bag_files = glob.glob(pattern, recursive=True)
+            # Search recursively in all subdirectories (Python 2 compatible)
+            bag_files = find_files_recursive(ROSBAG_FOLDER, "*.bag")
         else:
             # Search only in top-level folder
             pattern = os.path.join(ROSBAG_FOLDER, "*.bag")
