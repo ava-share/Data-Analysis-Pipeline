@@ -11,18 +11,18 @@ matplotlib.use('Agg')   # headless
 import matplotlib.pyplot as plt
 
 # ====== CONFIG =========================================================
-EXTRACTION_DATE = "16092025"   # e.g., run date token you want in the root folder name
+EXTRACTION_DATE = "11252025"   # e.g., run date token you want in the root folder name
 
 # BATCH PROCESSING: Set one of these options
 # Option 1: Process single rosbag file
-# ROSBAG_FILE = "/media/avresearch/RouteData/control_topics/ctrl6_2025-09-30-11-37-22.bag"
+ROSBAG_FILE = "/home/avresearch/Downloads/Route3AutonomousTesting11_20_2025_ctrl6_2025-11-20-13-15-07.bag"
 
-# Option 2: Process all rosbags in a folder
-ROSBAG_FOLDER = "/media/avresearch/RouteData/control_topics"  # Set to None to use single file
-ROSBAG_FILE = None  # Set to None to use folder processing
+# # Option 2: Process all rosbags in a folder
+# ROSBAG_FOLDER = "/home/avresearch/Downloads/perception_output_planning_2025-11-20_11-20-12"  # Set to None to use single file
+# ROSBAG_FILE = None  # Set to None to use folder processing
+# # Folder search options
+# SEARCH_RECURSIVELY = True  # Set to True to search all subdirectories, False for top-level only
 
-# Folder search options
-SEARCH_RECURSIVELY = True  # Set to True to search all subdirectories, False for top-level only
 
 # Control topics in your bag
 TOPIC_ODOM = "/novatel/oem7/odom"                    # nav_msgs/Odometry
@@ -313,7 +313,7 @@ def step7_calculate_control_metrics(lat_ctrl_perf_csv, velocity_cmd_csv, acceler
     metrics['autonomous_distance_m'] = autonomous_distance
     
     if VERBOSE:
-        print("[INFO] Control metrics: max_cross_track_error={:.3f}m, max_velocity={:.2f}m/s, max_acceleration={:.2f}m/s²".format(
+        print("[INFO] Control metrics: max_cross_track_error={:.3f}m, max_velocity={:.2f}m/s, max_acceleration={:.2f}m/s^2".format(
             metrics['max_cross_track_error'], metrics['max_velocity_commanded'], metrics['max_acceleration_commanded']))
         print("[INFO] Autonomous mode: duration={:.1f}s, distance={:.1f}m".format(
             autonomous_duration, autonomous_distance))
@@ -390,7 +390,7 @@ def step9_create_control_plots(lat_ctrl_perf_csv, velocity_cmd_csv, acceleration
             
             plot_time_series(ts, accelerations,
                            os.path.join(plots_dir, "acceleration_commanded_vs_time.png"),
-                           "Acceleration Commanded vs Time", "Acceleration (m/s²)")
+                           "Acceleration Commanded vs Time", "Acceleration (m/s^2)")
     
     print("[OK] Control plots created in -> {}".format(plots_dir))
 
