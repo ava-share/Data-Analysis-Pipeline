@@ -12,7 +12,7 @@ matplotlib.use('Agg')   # headless
 import matplotlib.pyplot as plt
 
 # ====== CONFIG =========================================================
-EXTRACTION_DATE = "16092025"   # e.g., run date token you want in the root folder name
+EXTRACTION_DATE = "11252025"   # e.g., run date token you want in the root folder name
 
 # BATCH PROCESSING: Set one of these options
 # Option 1: Process single rosbag file
@@ -20,9 +20,8 @@ EXTRACTION_DATE = "16092025"   # e.g., run date token you want in the root folde
 # ROSBAG_FILE = "/media/avresearch/RouteData/0828_Route2_Rosbags/Trial_1_2024-08-28-11/2024-08-28-11-23-33_2.bag"
 
 # Option 2: Process all rosbags in a folder
-ROSBAG_FOLDER = "/home/avresearch/Rounte2AutonomousTesting9_30_2025"  # Set to None to use single file
+ROSBAG_FOLDER = "/home/avresearch/Downloads/perception_output_planning_2025-11-20_11-20-12"  # Set to None to use single file
 ROSBAG_FILE = None  # Set to None to use folder processing
-
 # Folder search options
 SEARCH_RECURSIVELY = True  # Set to True to search all subdirectories, False for top-level only
 
@@ -48,7 +47,11 @@ FRAME_RATE        = 10.0     # output video FPS
 VERBOSE                = True        # print progress messages during processing
 DEBUG_FIRST_N_OBJECTS  = 2           # set to >0 to process only first N objects (by sorted ID)
 
+# Filtering options
+FILTER_UNKNOWN_OBJECTS = True       # Set to True to exclude objects with label 9999 (unknown) from processing
+
 # Object type mapping: numeric ID -> name
+# NOTE: Label 9999 is typically used for unknown/unclassified objects from the detection system
 OBJECT_TYPE_NAMES = {
     0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 4: "airplane", 5: "bus", 6: "train", 7: "truck", 8: "boat",
     9: "traffic_light", 10: "fire_hydrant", 11: "stop_sign", 12: "parking_meter", 13: "bench", 14: "bird", 15: "cat",
@@ -62,7 +65,8 @@ OBJECT_TYPE_NAMES = {
     67: "cell_phone", 68: "microwave", 69: "oven", 70: "toaster", 71: "sink", 72: "refrigerator", 73: "book",
     74: "clock", 75: "vase", 76: "scissors", 77: "teddy_bear", 78: "hair_drier", 79: "toothbrush", 80: "cone",
     81: "speed_limit_70", 82: "speed_limit_75", 83: "speed_limit_30", 84: "speed_limit_35", 85: "speed_limit_40",
-    86: "speed_limit_45", 87: "speed_limit_50", 88: "speed_limit_55", 89: "speed_limit_60", 90: "speed_limit_65"
+    86: "speed_limit_45", 87: "speed_limit_50", 88: "speed_limit_55", 89: "speed_limit_60", 90: "speed_limit_65",
+    9999: "unknown"  # Unclassified/unknown objects from detection system
 }
 
 # Static-object handling: For these labels, replace all x,y with their global average
@@ -168,11 +172,13 @@ def step1_dump_fused_bbox_csv(bag, bag_basename):
     """
     Read jsk_recognition_msgs/BoundingBoxArray from TOPIC_FUSED_BBOX
     and dump a tidy CSV with timestamp, frame_id, position, dims, label.
+    Also prints diagnostic information about detected labels.
     """
     # Save to intermediate results folder parallel to ROOT_OUT
     out_csv = os.path.join(INTERMEDIATE_OUT, "{}_fused_bbox_results.csv".format(bag_basename))
     wrote_header = False
     msg_count = 0
+    label_counts = {}  # Track label frequencies for diagnostics
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
         for topic, msg, t in bag.read_messages(topics=[TOPIC_FUSED_BBOX]):
@@ -188,8 +194,22 @@ def step1_dump_fused_bbox_csv(bag, bag_basename):
                     w.writerow(['frame_id','timestamp','x','y','z','dx','dy','dz','label'])
                     wrote_header = True
                 w.writerow([frame_id, ts, bx, by, bz, dx, dy, dz, lab])
+                # Track label counts
+                label_counts[lab] = label_counts.get(lab, 0) + 1
             if VERBOSE and (msg_count % 200 == 0):
                 print("[INFO] Read {} fused bbox messages...".format(msg_count))
+    
+    # Print label diagnostics
+    if VERBOSE and label_counts:
+        print("\n[DIAGNOSTIC] Label distribution in fused bbox data:")
+        total_detections = sum(label_counts.values())
+        for lab in sorted(label_counts.keys()):
+            count = label_counts[lab]
+            pct = 100.0 * count / total_detections if total_detections > 0 else 0.0
+            label_name = OBJECT_TYPE_NAMES.get(lab, 'unknown_{}'.format(lab))
+            print("  Label {} ({}): {} detections ({:.1f}%)".format(lab, label_name, count, pct))
+        print("  Total detections: {}\n".format(total_detections))
+    
     print("[OK] Fused bbox CSV -> {}".format(out_csv))
     return out_csv
 
@@ -472,6 +492,12 @@ def step5_build_trajectories(fused_csv, odom_csv, bag_basename):
             dom_label = Counter(labs).most_common(1)[0][0]
         except Exception:
             dom_label = labs[0]
+
+        # Filter out unknown objects if enabled
+        if FILTER_UNKNOWN_OBJECTS and dom_label == 9999:
+            if VERBOSE:
+                print("[INFO] Filtering out track {} (unknown object, label=9999)".format(tid))
+            continue
 
         # Heuristic: treat as static either by label or by small spatial spread
         is_label_static = (dom_label in STATIC_LABEL_IDS)
