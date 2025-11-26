@@ -20,7 +20,7 @@ EXTRACTION_DATE = "11252025"   # e.g., run date token you want in the root folde
 # ROSBAG_FILE = "/media/avresearch/RouteData/0828_Route2_Rosbags/Trial_1_2024-08-28-11/2024-08-28-11-23-33_2.bag"
 
 # Option 2: Process all rosbags in a folder
-ROSBAG_FOLDER = "/home/avresearch/Downloads/perception_output_planning_2025-11-20_11-20-12"  # Set to None to use single file
+ROSBAG_FOLDER = "/home/avresearch/Downloads"  # Set to None to use single file
 ROSBAG_FILE = None  # Set to None to use folder processing
 # Folder search options
 SEARCH_RECURSIVELY = True  # Set to True to search all subdirectories, False for top-level only
@@ -47,8 +47,8 @@ FRAME_RATE        = 10.0     # output video FPS
 VERBOSE                = True        # print progress messages during processing
 DEBUG_FIRST_N_OBJECTS  = 2           # set to >0 to process only first N objects (by sorted ID)
 
-# Filtering options
-FILTER_UNKNOWN_OBJECTS = True       # Set to True to exclude objects with label 9999 (unknown) from processing
+# Note: Label 9999 (unclassified_radar_detection) objects are automatically excluded from
+# tracking and video extraction, but are included in key metrics summary
 
 # Object type mapping: numeric ID -> name
 # NOTE: Label 9999 is typically used for unknown/unclassified objects from the detection system
@@ -66,7 +66,7 @@ OBJECT_TYPE_NAMES = {
     74: "clock", 75: "vase", 76: "scissors", 77: "teddy_bear", 78: "hair_drier", 79: "toothbrush", 80: "cone",
     81: "speed_limit_70", 82: "speed_limit_75", 83: "speed_limit_30", 84: "speed_limit_35", 85: "speed_limit_40",
     86: "speed_limit_45", 87: "speed_limit_50", 88: "speed_limit_55", 89: "speed_limit_60", 90: "speed_limit_65",
-    9999: "unknown"  # Unclassified/unknown objects from detection system
+    9999: "unclassified_radar_detection"  # Radar detections without classification (excluded from tracking/video extraction)
 }
 
 # Static-object handling: For these labels, replace all x,y with their global average
@@ -262,9 +262,10 @@ def step3_dump_odom_csv(bag, bag_basename, bag_out_dir):
     return out_csv
 
 # ====== STEP 4: CALCULATE KEY METRICS ===================================
-def step4_calculate_key_metrics(odom_csv, metadata, trajs):
+def step4_calculate_key_metrics(odom_csv, metadata, trajs, fused_csv=None):
     """
     Calculate key metrics from odometry and object counts.
+    Also counts unclassified radar detections (label 9999) from fused CSV if provided.
     Returns dict with all metrics.
     """
     # Load odometry data
@@ -329,7 +330,7 @@ def step4_calculate_key_metrics(odom_csv, metadata, trajs):
         print("[INFO] Acceleration stats: max_accel={:.2f} m/s² (<5 m/s²), max_decel={:.2f} m/s² (>-5 m/s²)".format(
             max_acceleration, max_deceleration))
     
-    # Count objects by type
+    # Count objects by type from trajectories (excludes label 9999)
     object_counts = {}
     for tid, rows in trajs.items():
         if not rows:
@@ -346,6 +347,47 @@ def step4_calculate_key_metrics(odom_csv, metadata, trajs):
             object_counts[dom_label] = 0
         object_counts[dom_label] += 1
     
+    # Count unclassified radar detections (label 9999) from fused CSV
+    # These are excluded from tracking but should be included in metrics
+    if fused_csv is not None:
+        try:
+            fused = np.genfromtxt(fused_csv, delimiter=',', names=True)
+            if 'label' in fused.dtype.names:
+                f_lab = fused['label']
+                mask_9999 = (f_lab == 9999)
+                if np.any(mask_9999):
+                    # Count unique unclassified radar detections
+                    # Group by timestamp and rounded position (0.5m precision) to count distinct detections
+                    # This avoids overcounting the same object detected multiple times in the same frame
+                    radar_detections = fused[mask_9999]
+                    if len(radar_detections) > 0:
+                        # Round positions to 0.5m to group nearby detections
+                        rounded_x = np.round(radar_detections['x'] / 0.5) * 0.5
+                        rounded_y = np.round(radar_detections['y'] / 0.5) * 0.5
+                        # Create unique keys from (timestamp, rounded_x, rounded_y)
+                        # Use timestamp rounded to 0.1s to group detections in the same frame
+                        rounded_ts = np.round(radar_detections['timestamp'] / 0.1) * 0.1
+                        unique_keys = set(zip(rounded_ts, rounded_x, rounded_y))
+                        unique_objects_9999 = len(unique_keys)
+                        
+                        if 9999 not in object_counts:
+                            object_counts[9999] = 0
+                        object_counts[9999] = unique_objects_9999
+                        if VERBOSE:
+                            total_detections = np.sum(mask_9999)
+                            print("[INFO] Found {} unclassified radar detections (label 9999) in fused bbox data".format(
+                                total_detections))
+                            print("[INFO] Counted {} unique unclassified radar detection objects (grouped by time+position)".format(
+                                unique_objects_9999))
+        except Exception as e:
+            if VERBOSE:
+                print("[WARN] Could not count unclassified radar detections from fused CSV: {}".format(e))
+    
+    # Calculate total objects (tracked objects + unclassified radar detections)
+    total_tracked_objects = len(trajs)
+    total_unclassified_radar = object_counts.get(9999, 0)
+    total_objects = total_tracked_objects + total_unclassified_radar
+    
     # Build metrics dict
     metrics = {
         'duration_s': duration,
@@ -354,7 +396,9 @@ def step4_calculate_key_metrics(odom_csv, metadata, trajs):
         'avg_velocity_ms': avg_velocity,
         'max_acceleration_ms2': max_acceleration,
         'max_deceleration_ms2': max_deceleration,
-        'total_objects': len(trajs),
+        'total_objects': total_objects,
+        'total_tracked_objects': total_tracked_objects,
+        'total_unclassified_radar_detections': total_unclassified_radar,
         'object_counts_by_type': object_counts
     }
     
@@ -396,6 +440,16 @@ def step5_build_trajectories(fused_csv, odom_csv, bag_basename):
     f_ts = fused['timestamp']
     f_xyz = np.vstack((fused['x'], fused['y'], fused['z'])).T
     f_lab = fused['label'] if 'label' in fused.dtype.names else np.full(len(f_ts), -1, dtype=np.int32)
+    
+    # Filter out unclassified radar detections (label 9999) - these are excluded from tracking
+    mask_not_9999 = (f_lab != 9999)
+    if not np.all(mask_not_9999):
+        num_filtered = np.sum(~mask_not_9999)
+        f_ts = f_ts[mask_not_9999]
+        f_xyz = f_xyz[mask_not_9999, :]
+        f_lab = f_lab[mask_not_9999]
+        if VERBOSE:
+            print("[INFO] Filtered out {} unclassified radar detections (label 9999) from trajectory building".format(num_filtered))
 
     # --- interpolate ego pose at detection times
     def interp_ego(ts_query):
@@ -493,11 +547,8 @@ def step5_build_trajectories(fused_csv, odom_csv, bag_basename):
         except Exception:
             dom_label = labs[0]
 
-        # Filter out unknown objects if enabled
-        if FILTER_UNKNOWN_OBJECTS and dom_label == 9999:
-            if VERBOSE:
-                print("[INFO] Filtering out track {} (unknown object, label=9999)".format(tid))
-            continue
+        # Note: Label 9999 (unclassified radar detections) are already filtered out
+        # at the data loading stage, so they won't reach this point
 
         # Heuristic: treat as static either by label or by small spatial spread
         is_label_static = (dom_label in STATIC_LABEL_IDS)
@@ -563,6 +614,11 @@ def step6_write_key_metrics_csv(metrics, bag_basename, bag_out_dir):
         w.writerow(['max_acceleration_ms2', metrics['max_acceleration_ms2']])
         w.writerow(['max_deceleration_ms2', metrics['max_deceleration_ms2']])
         w.writerow(['total_objects', metrics['total_objects']])
+        # Write object breakdown
+        if 'total_tracked_objects' in metrics:
+            w.writerow(['total_tracked_objects', metrics['total_tracked_objects']])
+        if 'total_unclassified_radar_detections' in metrics:
+            w.writerow(['total_unclassified_radar_detections', metrics['total_unclassified_radar_detections']])
         
         # Write object counts by type (using names instead of numeric labels)
         for label, count in metrics['object_counts_by_type'].items():
@@ -741,7 +797,7 @@ def process_single_bag(rosbag_file):
                 if VERBOSE:
                     print("[INFO] DEBUG: Restricting to first {} objects: {}".format(DEBUG_FIRST_N_OBJECTS, keep_ids))
             
-            metrics = step4_calculate_key_metrics(odom_csv, metadata, trajs)
+            metrics = step4_calculate_key_metrics(odom_csv, metadata, trajs, fused_csv)
             step6_write_key_metrics_csv(metrics, bag_basename, bag_out_dir)
             step7p_finalize_objects(trajs, bag_basename, bag_out_dir)
             step7_extract_frames(bag, trajs, bag_basename, bag_out_dir)
