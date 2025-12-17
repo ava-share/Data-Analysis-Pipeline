@@ -11,7 +11,7 @@ matplotlib.use('Agg')   # headless
 import matplotlib.pyplot as plt
 
 # ====== CONFIG =========================================================
-EXTRACTION_DATE = "11252025"   # e.g., run date token you want in the root folder name
+EXTRACTION_DATE = "12172025"   # e.g., run date token you want in the root folder name
 
 # BATCH PROCESSING: Set one of these options
 # Option 1: Process single rosbag file
@@ -25,7 +25,7 @@ ROSBAG_FILE = "/home/avresearch/Downloads/Route3AutonomousTesting11_20_2025_ctrl
 
 
 # Control topics in your bag
-TOPIC_ODOM = "/novatel/oem7/odom"                    # nav_msgs/Odometry
+TOPIC_ODOM = "novatel/oem7/odom"                    # nav_msgs/Odometry
 TOPIC_LAT_CTRL_PERF = "lat_ctrl_perf"               # geometry_msgs/Vector3Stamped (y=cross-track error, z=yaw error)
 TOPIC_CTRL_REF_TWIST = "ctrl_ref_twist"             # geometry_msgs/TwistStamped (velocity commanded)
 TOPIC_LAT_CTRL_CMD = "lat_ctrl_cmd"                 # geometry_msgs/Vector3Stamped (acceleration commanded)
@@ -46,9 +46,7 @@ def ensure_dir(path):
 
 # Initialize output directories (will be set per bag in batch processing)
 ROOT_OUT = "Control_data_{}".format(EXTRACTION_DATE)
-INTERMEDIATE_OUT = "Control_intermediate_{}".format(EXTRACTION_DATE)
 ensure_dir(ROOT_OUT)
-ensure_dir(INTERMEDIATE_OUT)
 
 # ====== UTILITIES ======================================================
 def moving_average(vals, k):
@@ -73,7 +71,7 @@ def debug_rosbag_topics(rosbag_file):
                 print("  {}: {} ({} messages)".format(topic, topic_info.msg_type, topic_info.message_count))
             
             print("\nLooking for control topics:")
-            control_topics = [TOPIC_LAT_CTRL_PERF, TOPIC_CTRL_REF_TWIST, TOPIC_LAT_CTRL_CMD, TOPIC_CTRL_REF_CURV, TOPIC_STEER_CTRL_CMD]
+            control_topics = [TOPIC_ODOM, TOPIC_LAT_CTRL_PERF, TOPIC_CTRL_REF_TWIST, TOPIC_LAT_CTRL_CMD, TOPIC_CTRL_REF_CURV, TOPIC_STEER_CTRL_CMD]
             for topic in control_topics:
                 if topic in info.topics:
                     print("  ✓ Found: {} ({} messages)".format(topic, info.topics[topic].message_count))
@@ -94,12 +92,12 @@ def plot_time_series(ts, values, out_path, title, ylabel):
     plt.close()
 
 # ====== STEP 1: READ CONTROL PERFORMANCE DATA =========================
-def step1_dump_lat_ctrl_perf_csv(bag, bag_basename):
+def step1_dump_lat_ctrl_perf_csv(bag, bag_basename, bag_out_dir):
     """
     Read geometry_msgs/Vector3Stamped from TOPIC_LAT_CTRL_PERF
     and dump CSV with timestamp, cross_track_error, yaw_error.
     """
-    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_lat_ctrl_perf.csv".format(bag_basename))
+    out_csv = os.path.join(bag_out_dir, "{}_lat_ctrl_perf.csv".format(bag_basename))
     msg_count = 0
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
@@ -120,12 +118,12 @@ def step1_dump_lat_ctrl_perf_csv(bag, bag_basename):
     return out_csv
 
 # ====== STEP 2: READ VELOCITY COMMANDED DATA ==========================
-def step2_dump_velocity_cmd_csv(bag, bag_basename):
+def step2_dump_velocity_cmd_csv(bag, bag_basename, bag_out_dir):
     """
     Read geometry_msgs/TwistStamped from TOPIC_CTRL_REF_TWIST
     and dump CSV with timestamp, velocity_commanded.
     """
-    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_velocity_cmd.csv".format(bag_basename))
+    out_csv = os.path.join(bag_out_dir, "{}_velocity_cmd.csv".format(bag_basename))
     msg_count = 0
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
@@ -148,12 +146,12 @@ def step2_dump_velocity_cmd_csv(bag, bag_basename):
     return out_csv
 
 # ====== STEP 3: READ ACCELERATION COMMANDED DATA =====================
-def step3_dump_acceleration_cmd_csv(bag, bag_basename):
+def step3_dump_acceleration_cmd_csv(bag, bag_basename, bag_out_dir):
     """
     Read geometry_msgs/Vector3Stamped from TOPIC_LAT_CTRL_CMD
     and dump CSV with timestamp, acceleration_commanded.
     """
-    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_acceleration_cmd.csv".format(bag_basename))
+    out_csv = os.path.join(bag_out_dir, "{}_acceleration_cmd.csv".format(bag_basename))
     msg_count = 0
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
@@ -176,12 +174,12 @@ def step3_dump_acceleration_cmd_csv(bag, bag_basename):
     return out_csv
 
 # ====== STEP 4: READ CURVATURE REFERENCE DATA ========================
-def step4_dump_curvature_ref_csv(bag, bag_basename):
+def step4_dump_curvature_ref_csv(bag, bag_basename, bag_out_dir):
     """
     Read geometry_msgs/PointStamped from TOPIC_CTRL_REF_CURV
     and dump CSV with timestamp, curvature_reference.
     """
-    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_curvature_ref.csv".format(bag_basename))
+    out_csv = os.path.join(bag_out_dir, "{}_curvature_ref.csv".format(bag_basename))
     msg_count = 0
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
@@ -201,12 +199,12 @@ def step4_dump_curvature_ref_csv(bag, bag_basename):
     return out_csv
 
 # ====== STEP 5: READ AUTONOMOUS MODE DATA ============================
-def step5_dump_autonomous_mode_csv(bag, bag_basename):
+def step5_dump_autonomous_mode_csv(bag, bag_basename, bag_out_dir):
     """
     Read geometry_msgs/Vector3Stamped from TOPIC_STEER_CTRL_CMD
     and dump CSV with timestamp and autonomous mode indicator.
     """
-    out_csv = os.path.join(INTERMEDIATE_OUT, "{}_autonomous_mode.csv".format(bag_basename))
+    out_csv = os.path.join(bag_out_dir, "{}_autonomous_mode.csv".format(bag_basename))
     msg_count = 0
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
@@ -226,7 +224,58 @@ def step5_dump_autonomous_mode_csv(bag, bag_basename):
         print("[OK] Autonomous mode CSV -> {} ({} messages)".format(out_csv, msg_count))
     return out_csv
 
-# (Removed odometry reading; distance will be estimated from commanded speed)
+# ====== STEP 6: READ ODOMETRY DATA ====================================
+def step6_dump_odom_csv(bag, bag_basename, bag_out_dir):
+    """
+    Read nav_msgs/Odometry from TOPIC_ODOM
+    and dump CSV with timestamp, position, orientation, linear velocity, angular velocity.
+    Saves directly to bag_out_dir (not intermediate).
+    """
+    out_csv = os.path.join(bag_out_dir, "{}_odom.csv".format(bag_basename))
+    msg_count = 0
+    with open(out_csv, 'w') as f:
+        w = csv.writer(f)
+        w.writerow(['timestamp', 'position_x', 'position_y', 'position_z', 
+                   'orientation_x', 'orientation_y', 'orientation_z', 'orientation_w',
+                   'linear_velocity_x', 'linear_velocity_y', 'linear_velocity_z',
+                   'angular_velocity_x', 'angular_velocity_y', 'angular_velocity_z'])
+        for topic, msg, t in bag.read_messages(topics=[TOPIC_ODOM]):
+            msg_count += 1
+            ts = msg.header.stamp.to_sec() if msg.header.stamp else t.to_sec()
+            
+            # Extract position
+            pos_x = msg.pose.pose.position.x
+            pos_y = msg.pose.pose.position.y
+            pos_z = msg.pose.pose.position.z
+            
+            # Extract orientation (quaternion)
+            ori_x = msg.pose.pose.orientation.x
+            ori_y = msg.pose.pose.orientation.y
+            ori_z = msg.pose.pose.orientation.z
+            ori_w = msg.pose.pose.orientation.w
+            
+            # Extract linear velocity
+            lin_vel_x = msg.twist.twist.linear.x
+            lin_vel_y = msg.twist.twist.linear.y
+            lin_vel_z = msg.twist.twist.linear.z
+            
+            # Extract angular velocity
+            ang_vel_x = msg.twist.twist.angular.x
+            ang_vel_y = msg.twist.twist.angular.y
+            ang_vel_z = msg.twist.twist.angular.z
+            
+            w.writerow([ts, pos_x, pos_y, pos_z, 
+                       ori_x, ori_y, ori_z, ori_w,
+                       lin_vel_x, lin_vel_y, lin_vel_z,
+                       ang_vel_x, ang_vel_y, ang_vel_z])
+            if VERBOSE and (msg_count % 2000 == 0):
+                print("[INFO] Read {} odometry messages...".format(msg_count))
+    
+    if msg_count == 0:
+        print("[WARN] No messages found for topic: {}".format(TOPIC_ODOM))
+    else:
+        print("[OK] Odometry CSV -> {} ({} messages)".format(out_csv, msg_count))
+    return out_csv
 
 # ====== STEP 7: CALCULATE CONTROL KEY METRICS ========================
 def step7_calculate_control_metrics(lat_ctrl_perf_csv, velocity_cmd_csv, acceleration_cmd_csv, autonomous_mode_csv):
@@ -452,11 +501,14 @@ def process_single_bag(rosbag_file):
         
         with rosbag.Bag(rosbag_file, 'r') as bag:
             # Extract control data
-            lat_ctrl_perf_csv = step1_dump_lat_ctrl_perf_csv(bag, bag_basename)
-            velocity_cmd_csv = step2_dump_velocity_cmd_csv(bag, bag_basename)
-            acceleration_cmd_csv = step3_dump_acceleration_cmd_csv(bag, bag_basename)
-            curvature_ref_csv = step4_dump_curvature_ref_csv(bag, bag_basename)
-            autonomous_mode_csv = step5_dump_autonomous_mode_csv(bag, bag_basename)
+            lat_ctrl_perf_csv = step1_dump_lat_ctrl_perf_csv(bag, bag_basename, bag_out_dir)
+            velocity_cmd_csv = step2_dump_velocity_cmd_csv(bag, bag_basename, bag_out_dir)
+            acceleration_cmd_csv = step3_dump_acceleration_cmd_csv(bag, bag_basename, bag_out_dir)
+            curvature_ref_csv = step4_dump_curvature_ref_csv(bag, bag_basename, bag_out_dir)
+            autonomous_mode_csv = step5_dump_autonomous_mode_csv(bag, bag_basename, bag_out_dir)
+            
+            # Extract odometry data (saves directly to bag_out_dir)
+            step6_dump_odom_csv(bag, bag_basename, bag_out_dir)
             
             # Calculate control metrics
             metrics = step7_calculate_control_metrics(lat_ctrl_perf_csv, velocity_cmd_csv, acceleration_cmd_csv, autonomous_mode_csv)
