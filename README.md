@@ -4,9 +4,9 @@ This repository contains Python-based pipelines to extract and analyze data from
 
 1. **Perception Data Pipeline** (`data-pipeline.py`): Extracts, associates, and packages perception outputs into per-object artifacts (CSVs, plots, camera frame dumps, and videos), along with ego odometry.
 
-2. **Control Data Pipeline** (`control-data-pipeline.py`): Extracts control system data including lateral control performance, velocity/acceleration commands, and autonomous mode metrics.
+2. **Control Data Pipeline** (`control-data-pipeline.py`): Extracts control system data including lateral control performance, velocity/acceleration commands, autonomous mode metrics, and vehicle odometry.
 
-Both pipelines write intermediate CSVs for sanity checks.
+**Note**: The Perception Data Pipeline writes intermediate CSVs for sanity checks. The Control Data Pipeline saves all CSV files directly in the bag output directory (no intermediate folder).
 
 ### Prerequisites
 - ROS1 environment with `rosbag` available in Python (typically Python 2 for Kinetic/Melodic). Noetic uses Python 3; this script currently targets Python 2.
@@ -19,6 +19,7 @@ Both pipelines write intermediate CSVs for sanity checks.
 - `/rosbag_metadata` (std_msgs/String) - contains metadata in format: "location: RTA-4 Transit, vehicle: blue, passengers: 2, road_type: gravel, road_condition: dry, comments: No comments, maneuver: manual driving, categories: perception_output"
 
 ### Control Data Pipeline Topics
+- `novatel/oem7/odom` (nav_msgs/Odometry) - vehicle odometry (position, orientation, velocities)
 - `lat_ctrl_perf` (geometry_msgs/Vector3Stamped) - y=cross-track error, z=yaw error
 - `ctrl_ref_twist` (geometry_msgs/TwistStamped) - velocity commanded
 - `lat_ctrl_cmd` (geometry_msgs/Vector3Stamped) - acceleration commanded
@@ -53,7 +54,7 @@ Edit `control-data-pipeline.py` top-level constants to match your environment:
 - **Folder Search Options**:
   - `SEARCH_RECURSIVELY = True`: Search for `.bag` files in all subdirectories (default)
   - `SEARCH_RECURSIVELY = False`: Search only in the top-level folder
-- Topic names: `TOPIC_LAT_CTRL_PERF`, `TOPIC_CTRL_REF_TWIST`, `TOPIC_LAT_CTRL_CMD`, `TOPIC_CTRL_REF_CURV`, `TOPIC_STEER_CTRL_CMD`
+- Topic names: `TOPIC_ODOM`, `TOPIC_LAT_CTRL_PERF`, `TOPIC_CTRL_REF_TWIST`, `TOPIC_LAT_CTRL_CMD`, `TOPIC_CTRL_REF_CURV`, `TOPIC_STEER_CTRL_CMD`
 - Verbosity/debug:
   - `VERBOSE = True` for progress messages.
   - `DEBUG_FIRST_N_MESSAGES = 0` to process all messages; set to a small number for debugging.
@@ -104,35 +105,40 @@ Edit `control-data-pipeline.py` top-level constants to match your environment:
 1) Lateral Control Performance → CSV
    - Reads `geometry_msgs/Vector3Stamped` from `lat_ctrl_perf`.
    - Extracts cross-track error (vector.y) and yaw error (vector.z).
-   - Writes to `{INTERMEDIATE_OUT}/{bag}_lat_ctrl_perf.csv`.
+   - Writes to `{BAG_OUT_DIR}/{bag}_lat_ctrl_perf.csv`.
 
 2) Velocity Commanded → CSV
    - Reads `geometry_msgs/TwistStamped` from `ctrl_ref_twist`.
    - Calculates velocity magnitude from linear components.
-   - Writes to `{INTERMEDIATE_OUT}/{bag}_velocity_cmd.csv`.
+   - Writes to `{BAG_OUT_DIR}/{bag}_velocity_cmd.csv`.
 
 3) Acceleration Commanded → CSV
    - Reads `geometry_msgs/Vector3Stamped` from `lat_ctrl_cmd`.
    - Calculates acceleration magnitude from vector components.
-   - Writes to `{INTERMEDIATE_OUT}/{bag}_acceleration_cmd.csv`.
+   - Writes to `{BAG_OUT_DIR}/{bag}_acceleration_cmd.csv`.
 
 4) Curvature Reference → CSV
    - Reads `geometry_msgs/PointStamped` from `ctrl_ref_curv`.
    - Extracts curvature reference (point.x).
-   - Writes to `{INTERMEDIATE_OUT}/{bag}_curvature_ref.csv`.
+   - Writes to `{BAG_OUT_DIR}/{bag}_curvature_ref.csv`.
 
 5) Autonomous Mode Detection → CSV
    - Reads `geometry_msgs/Vector3Stamped` from `steer_ctrl_cmd`.
    - If messages exist, vehicle is in autonomous mode.
-   - Writes to `{INTERMEDIATE_OUT}/{bag}_autonomous_mode.csv`.
+   - Writes to `{BAG_OUT_DIR}/{bag}_autonomous_mode.csv`.
 
-6) Control Key Metrics Calculation
+6) Odometry Extraction → CSV
+   - Reads `nav_msgs/Odometry` from `novatel/oem7/odom`.
+   - Extracts position (x, y, z), orientation quaternion (x, y, z, w), linear velocity, angular velocity.
+   - Writes to `{BAG_OUT_DIR}/{bag}_odom.csv`.
+
+7) Control Key Metrics Calculation
    - Calculates autonomous duration from first to last `steer_ctrl_cmd` timestamp.
    - Estimates autonomous distance as average commanded speed during autonomous window × duration.
    - Computes max cross-track error, max yaw error, max velocity/acceleration/deceleration commanded.
    - Writes to `{BAG_OUT_DIR}/{bag}_control_key_metrics.csv`.
 
-7) Control Plots Generation
+8) Control Plots Generation
    - Creates time-series plots: lateral error, yaw error, velocity commanded, acceleration commanded.
    - Saves to `{BAG_OUT_DIR}/control_plots/`.
 
@@ -247,51 +253,48 @@ Where:
 **For Single File Processing:**
 ```text
 .
-├── Control_data_{EXTRACTION_DATE}/
-│   └── {bag}_control_data/
-│       ├── {bag}_control_key_metrics.csv
-│       └── control_plots/
-│           ├── lateral_error_vs_time.png
-│           ├── yaw_error_vs_time.png
-│           ├── velocity_commanded_vs_time.png
-│           └── acceleration_commanded_vs_time.png
-└── Control_intermediate_{EXTRACTION_DATE}/
-    ├── {bag}_lat_ctrl_perf.csv
-    ├── {bag}_velocity_cmd.csv
-    ├── {bag}_acceleration_cmd.csv
-    ├── {bag}_curvature_ref.csv
-    └── {bag}_autonomous_mode.csv
+└── Control_data_{EXTRACTION_DATE}/
+    └── {bag}_control_data/
+        ├── {bag}_lat_ctrl_perf.csv
+        ├── {bag}_velocity_cmd.csv
+        ├── {bag}_acceleration_cmd.csv
+        ├── {bag}_curvature_ref.csv
+        ├── {bag}_autonomous_mode.csv
+        ├── {bag}_odom.csv
+        ├── {bag}_control_key_metrics.csv
+        └── control_plots/
+            ├── lateral_error_vs_time.png
+            ├── yaw_error_vs_time.png
+            ├── velocity_commanded_vs_time.png
+            └── acceleration_commanded_vs_time.png
 ```
 
 **For Batch Processing (Multiple Rosbags):**
 ```text
 .
-├── Control_data_{EXTRACTION_DATE}/
-│   ├── {bag1}_control_data/
-│   │   ├── {bag1}_control_key_metrics.csv
-│   │   └── control_plots/
-│   │       ├── lateral_error_vs_time.png
-│   │       ├── yaw_error_vs_time.png
-│   │       ├── velocity_commanded_vs_time.png
-│   │       └── acceleration_commanded_vs_time.png
-│   ├── {bag2}_control_data/
-│   │   └── ...
-│   └── {bag3}_control_data/
-│       └── ...
-└── Control_intermediate_{EXTRACTION_DATE}/
-    ├── {bag1}_lat_ctrl_perf.csv
-    ├── {bag1}_velocity_cmd.csv
-    ├── {bag1}_acceleration_cmd.csv
-    ├── {bag1}_curvature_ref.csv
-    ├── {bag1}_autonomous_mode.csv
-    ├── {bag2}_lat_ctrl_perf.csv
-    ├── {bag2}_velocity_cmd.csv
-    └── ...
+└── Control_data_{EXTRACTION_DATE}/
+    ├── {bag1}_control_data/
+    │   ├── {bag1}_lat_ctrl_perf.csv
+    │   ├── {bag1}_velocity_cmd.csv
+    │   ├── {bag1}_acceleration_cmd.csv
+    │   ├── {bag1}_curvature_ref.csv
+    │   ├── {bag1}_autonomous_mode.csv
+    │   ├── {bag1}_odom.csv
+    │   ├── {bag1}_control_key_metrics.csv
+    │   └── control_plots/
+    │       ├── lateral_error_vs_time.png
+    │       ├── yaw_error_vs_time.png
+    │       ├── velocity_commanded_vs_time.png
+    │       └── acceleration_commanded_vs_time.png
+    ├── {bag2}_control_data/
+    │   └── ...
+    └── {bag3}_control_data/
+        └── ...
 ```
 
 Where:
-- `Control_data_{EXTRACTION_DATE}/{bag}_control_data/` contains the control key metrics CSV and plots for each bag.
-- `Control_intermediate_{EXTRACTION_DATE}/` contains the intermediate CSVs for sanity checks for all processed bags.
+- `Control_data_{EXTRACTION_DATE}/{bag}_control_data/` contains all CSV files (control data, odometry, and key metrics) and plots for each bag.
+- All output files are organized together in each bag's control data directory (no intermediate folder).
 - **Batch processing**: Each rosbag gets its own output directory with the same structure, allowing you to process multiple bags while maintaining organized outputs.
 
 ### Key Metrics CSV Format
@@ -365,9 +368,11 @@ The `{bag}_control_key_metrics.csv` file contains:
 - Update `STATIC_LABEL_IDS` with your detector's numeric labels for static objects to enforce average-position smoothing on those classes.
 
 #### Control Data Pipeline Tips
-- If intermediate files are empty, check that topic names match exactly (no leading `/` for control topics).
+- If CSV files are empty, check that topic names match exactly (no leading `/` for control topics; odometry topic may or may not have leading `/`).
 - The script includes debug output to show available topics in your rosbag - use this to verify topic names.
 - Autonomous mode detection relies on the presence of `steer_ctrl_cmd` messages.
 - Distance estimation uses average commanded speed during autonomous mode - this is an approximation.
+- For more accurate distance calculations, use the odometry CSV file (`{bag}_odom.csv`) to compute actual traveled distance.
+- **Odometry data**: Position is in global coordinates (typically UTM/ENU frame). Orientation is provided as quaternion - extract yaw angle if needed for heading analysis.
 
 
